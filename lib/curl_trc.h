@@ -84,12 +84,24 @@ void Curl_failf(struct Curl_easy *data,
   do { if(Curl_trc_ft_is_verbose(data, &Curl_trc_feat_read)) \
          Curl_trc_read(data, __VA_ARGS__); } while(0)
 
-#else
+#ifndef CURL_DISABLE_FTP
+#define CURL_TRC_FTP(data, ...) \
+  do { if(Curl_trc_ft_is_verbose(data, &Curl_trc_feat_ftp)) \
+         Curl_trc_ftp(data, __VA_ARGS__); } while(0)
+#endif /* !CURL_DISABLE_FTP */
+
+#else /* CURL_HAVE_C99 */
+
 #define infof Curl_infof
 #define CURL_TRC_CF Curl_trc_cf_infof
 #define CURL_TRC_WRITE Curl_trc_write
 #define CURL_TRC_READ  Curl_trc_read
+
+#ifndef CURL_DISABLE_FTP
+#define CURL_TRC_FTP   Curl_trc_ftp
 #endif
+
+#endif /* !CURL_HAVE_C99 */
 
 #ifndef CURL_DISABLE_VERBOSE_STRINGS
 /* informational messages enabled */
@@ -131,16 +143,19 @@ void Curl_trc_write(struct Curl_easy *data,
 void Curl_trc_read(struct Curl_easy *data,
                    const char *fmt, ...) CURL_PRINTF(2, 3);
 
-
-
+#ifndef CURL_DISABLE_FTP
+extern struct curl_trc_feat Curl_trc_feat_ftp;
+void Curl_trc_ftp(struct Curl_easy *data,
+                  const char *fmt, ...) CURL_PRINTF(2, 3);
+#endif
 
 
 #else /* defined(CURL_DISABLE_VERBOSE_STRINGS) */
 /* All informational messages are not compiled in for size savings */
 
-#define Curl_trc_is_verbose(d)        ((void)(d), FALSE)
-#define Curl_trc_cf_is_verbose(x,y)   ((void)(x), (void)(y), FALSE)
-#define Curl_trc_ft_is_verbose(x,y)   ((void)(x), (void)(y), FALSE)
+#define Curl_trc_is_verbose(d)        (FALSE)
+#define Curl_trc_cf_is_verbose(x,y)   (FALSE)
+#define Curl_trc_ft_is_verbose(x,y)   (FALSE)
 
 static void Curl_infof(struct Curl_easy *data, const char *fmt, ...)
 {
@@ -153,6 +168,8 @@ static void Curl_trc_cf_infof(struct Curl_easy *data,
 {
   (void)data; (void)cf; (void)fmt;
 }
+
+struct curl_trc_feat;
 
 static void Curl_trc_ft_infof(struct Curl_easy *data,
                               struct curl_trc_feat *ft,
@@ -170,6 +187,13 @@ static void Curl_trc_read(struct Curl_easy *data, const char *fmt, ...)
 {
   (void)data; (void)fmt;
 }
+
+#ifndef CURL_DISABLE_FTP
+static void Curl_trc_ftp(struct Curl_easy *data, const char *fmt, ...)
+{
+  (void)data; (void)fmt;
+}
+#endif
 
 #endif /* !defined(CURL_DISABLE_VERBOSE_STRINGS) */
 

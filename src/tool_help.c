@@ -31,6 +31,7 @@
 #include "tool_util.h"
 #include "tool_version.h"
 #include "tool_cb_prg.h"
+#include "terminal.h"
 
 #include "memdebug.h" /* keep this as LAST include */
 
@@ -55,7 +56,7 @@ static const struct category_descriptors categories[] = {
   {"http", "HTTP and HTTPS protocol options", CURLHELP_HTTP},
   {"imap", "IMAP protocol options", CURLHELP_IMAP},
   /* important is left out because it is the default help page */
-  {"misc", "Options that don't fit into any other category", CURLHELP_MISC},
+  {"misc", "Options that do not fit into any other category", CURLHELP_MISC},
   {"output", "Filesystem output", CURLHELP_OUTPUT},
   {"pop3", "POP3 protocol options", CURLHELP_POP3},
   {"post", "HTTP Post specific options", CURLHELP_POST},
@@ -67,6 +68,7 @@ static const struct category_descriptors categories[] = {
   {"telnet", "TELNET protocol options", CURLHELP_TELNET},
   {"tftp", "TFTP protocol options", CURLHELP_TFTP},
   {"tls", "All TLS/SSL related options", CURLHELP_TLS},
+  {"ech", "All Encrypted Client Hello (ECH) options", CURLHELP_ECH},
   {"upload", "All options for uploads",
    CURLHELP_UPLOAD},
   {"verbose", "Options related to any kind of command line output of curl",
@@ -96,15 +98,15 @@ static void print_category(curlhelp_t category, unsigned int cols)
 
   for(i = 0; helptext[i].opt; ++i)
     if(helptext[i].categories & category) {
-      int opt = (int)longopt;
+      size_t opt = longopt;
       size_t desclen = strlen(helptext[i].desc);
       if(opt + desclen >= (cols - 2)) {
         if(desclen < (cols - 2))
-          opt = (cols - 3) - (int)desclen;
+          opt = (cols - 3) - desclen;
         else
           opt = 0;
       }
-      printf(" %-*s  %s\n", opt, helptext[i].opt, helptext[i].desc);
+      printf(" %-*s  %s\n", (int)opt, helptext[i].opt, helptext[i].desc);
     }
 }
 

@@ -194,9 +194,30 @@ void Curl_trc_write(struct Curl_easy *data, const char *fmt, ...)
   }
 }
 
+#ifndef CURL_DISABLE_FTP
+struct curl_trc_feat Curl_trc_feat_ftp = {
+  "FTP",
+  CURL_LOG_LVL_NONE,
+};
+
+void Curl_trc_ftp(struct Curl_easy *data, const char *fmt, ...)
+{
+  DEBUGASSERT(!strchr(fmt, '\n'));
+  if(Curl_trc_ft_is_verbose(data, &Curl_trc_feat_ftp)) {
+    va_list ap;
+    va_start(ap, fmt);
+    trc_infof(data, &Curl_trc_feat_ftp, fmt, ap);
+    va_end(ap);
+  }
+}
+#endif /* !CURL_DISABLE_FTP */
+
 static struct curl_trc_feat *trc_feats[] = {
   &Curl_trc_feat_read,
   &Curl_trc_feat_write,
+#ifndef CURL_DISABLE_FTP
+  &Curl_trc_feat_ftp,
+#endif
 #ifndef CURL_DISABLE_DOH
   &Curl_doh_trc,
 #endif
@@ -230,7 +251,7 @@ static struct Curl_cftype *cf_types[] = {
   &Curl_cft_haproxy,
   &Curl_cft_socks_proxy,
 #endif /* !CURL_DISABLE_PROXY */
-#ifdef ENABLE_QUIC
+#ifdef USE_HTTP3
   &Curl_cft_http3,
 #endif
 #if !defined(CURL_DISABLE_HTTP) && !defined(USE_HYPER)

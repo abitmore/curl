@@ -246,6 +246,7 @@ class Httpd:
                 f'ErrorLog {self._error_log}',
                 f'LogLevel {self._get_log_level()}',
                 f'StartServers 4',
+                f'ReadBufferSize 16000',
                 f'H2MinWorkers 16',
                 f'H2MaxWorkers 256',
                 f'H2Direct on',
@@ -255,6 +256,13 @@ class Httpd:
                 f'Listen {self.env.proxys_port}',
                 f'TypesConfig "{self._conf_dir}/mime.types',
                 f'SSLSessionCache "shmcb:ssl_gcache_data(32000)"',
+                (f'SSLCipherSuite SSL'
+                 f' ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256'
+                 f':ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305'
+                ),
+                (f'SSLCipherSuite TLSv1.3'
+                 f' TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256'
+                ),
             ]
             if 'base' in self._extra_configs:
                 conf.extend(self._extra_configs['base'])
@@ -392,10 +400,15 @@ class Httpd:
         lines = []
         if Httpd.MOD_CURLTEST is not None:
             lines.extend([
+                f'    Redirect 302 /data.json.302 /data.json',
                 f'    Redirect 301 /curltest/echo301 /curltest/echo',
                 f'    Redirect 302 /curltest/echo302 /curltest/echo',
                 f'    Redirect 303 /curltest/echo303 /curltest/echo',
                 f'    Redirect 307 /curltest/echo307 /curltest/echo',
+                f'    <Location /curltest/sslinfo>',
+                f'      SSLOptions StdEnvVars',
+                f'      SetHandler curltest-sslinfo',
+                f'    </Location>',
                 f'    <Location /curltest/echo>',
                 f'      SetHandler curltest-echo',
                 f'    </Location>',

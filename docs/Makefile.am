@@ -28,6 +28,7 @@ if BUILD_DOCS
 # if we disable man page building, ignore these
 MK_CA_DOCS = mk-ca-bundle.1
 CURLCONF_DOCS = curl-config.1
+man_MANS = curl-config.1
 endif
 
 CURLPAGES = curl-config.md mk-ca-bundle.md
@@ -43,6 +44,7 @@ EXTRA_DIST =                                    \
  $(CURLPAGES)                                   \
  ALTSVC.md                                      \
  BINDINGS.md                                    \
+ BUFQ.md                                        \
  BUFREF.md                                      \
  BUG-BOUNTY.md                                  \
  BUGS.md                                        \
@@ -62,6 +64,7 @@ EXTRA_DIST =                                    \
  DISTROS.md                                     \
  DYNBUF.md                                      \
  EARLY-RELEASE.md                               \
+ ECH.md                                         \
  EXPERIMENTAL.md                                \
  FAQ                                            \
  FEATURES.md                                    \
@@ -77,8 +80,10 @@ EXTRA_DIST =                                    \
  INSTALL-CMAKE.md                               \
  INSTALL.md                                     \
  INTERNALS.md                                   \
+ IPFS.md                                        \
  KNOWN_BUGS                                     \
  MAIL-ETIQUETTE.md                              \
+ MANUAL.md                                      \
  MQTT.md                                        \
  NEW-PROTOCOL.md                                \
  options-in-versions                            \
