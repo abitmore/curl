@@ -65,7 +65,10 @@
 
 /* allow no more than 5 "chained" compression steps */
 #define MAX_ENCODE_STACK 5
+
+#if defined(HAVE_LIBZ) || defined(HAVE_BROTLI) || defined(HAVE_ZSTD)
 #define DECOMPRESS_BUFFER_SIZE 16384 /* buffer size for decompressed data */
+#endif
 
 #ifdef HAVE_LIBZ
 
@@ -755,7 +758,7 @@ CURLcode Curl_build_unencoding_stack(struct Curl_easy *data,
     name = enclist;
 
     for(namelen = 0; *enclist && *enclist != ','; enclist++)
-      if(!ISSPACE(*enclist))
+      if(*enclist > ' ')
         namelen = enclist - name + 1;
 
     if(namelen) {
