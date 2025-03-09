@@ -86,7 +86,7 @@ int Curl_wait_ms(timediff_t timeout_ms)
     timeout_ms = ULONG_MAX-1;
     /* do not use ULONG_MAX, because that is equal to INFINITE */
 #endif
-  Sleep((ULONG)timeout_ms);
+  Sleep((DWORD)timeout_ms);
 #else
   /* avoid using poll() for this since it behaves incorrectly with no sockets
      on Apple operating systems */
@@ -408,6 +408,11 @@ void Curl_pollfds_init(struct curl_pollfds *cpfds,
     cpfds->pfds = static_pfds;
     cpfds->count = static_count;
   }
+}
+
+void Curl_pollfds_reset(struct curl_pollfds *cpfds)
+{
+  cpfds->n = 0;
 }
 
 void Curl_pollfds_cleanup(struct curl_pollfds *cpfds)

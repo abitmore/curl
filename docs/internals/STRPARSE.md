@@ -30,6 +30,19 @@ struct Curl_str {
 };
 ~~~
 
+Access the struct fields with `Curl_str()` for the pointer and `Curl_strlen()`
+for the length rather than using the struct fields directly.
+
+## `Curl_str_init`
+
+~~~c
+void Curl_str_init(struct Curl_str *out)
+~~~
+
+This initiates a string struct. The parser functions that store info in
+strings always init the string themselves, so this stand-alone use is often
+not necessary.
+
 ## `Curl_str_word`
 
 ~~~c
@@ -68,7 +81,7 @@ int Curl_str_quotedword(char **linep, struct Curl_str *out, const size_t max);
 ~~~
 
 Get a "quoted" word. This means everything that is provided within a leading
-and an ending double character. No escaping possible.
+and an ending double quote character. No escaping possible.
 
 `max` is the longest accepted word, or it returns error.
 
@@ -94,11 +107,32 @@ Advance over a single ASCII space. Return non-zero on error.
 ## `Curl_str_number`
 
 ~~~c
-int Curl_str_number(char **linep, size_t *nump, size_t max);
+int Curl_str_number(char **linep, curl_size_t *nump, size_t max);
 ~~~
 
-Get an unsigned decimal number. Leading zeroes are just swallowed. Return
-non-zero on error.
+Get an unsigned decimal number not larger than `max`. Leading zeroes are just
+swallowed. Return non-zero on error. Returns error if there was not a single
+digit.
+
+## `Curl_str_hex`
+
+~~~c
+int Curl_str_hex(char **linep, curl_size_t *nump, size_t max);
+~~~
+
+Get an unsigned hexadecimal number not larger than `max`. Leading zeroes are
+just swallowed. Return non-zero on error. Returns error if there was not a
+single digit. Does *not* handled `0x` prefix.
+
+## `Curl_str_octal`
+
+~~~c
+int Curl_str_octal(char **linep, curl_size_t *nump, size_t max);
+~~~
+
+Get an unsigned octal number not larger than `max`. Leading zeroes are just
+swallowed. Return non-zero on error. Returns error if there was not a single
+digit.
 
 ## `Curl_str_newline`
 
@@ -107,3 +141,30 @@ int Curl_str_newline(char **linep);
 ~~~
 
 Check for a single CR or LF. Return non-zero on error */
+
+## `Curl_str_casecompare`
+
+~~~c
+int Curl_str_casecompare(struct Curl_str *str, const char *check);
+~~~
+
+Returns true if the provided string in the `str` argument matches the `check`
+string case insensitively.
+
+## `Curl_str_cmp`
+
+~~~c
+int Curl_str_cmp(struct Curl_str *str, const char *check);
+~~~
+
+Returns true if the provided string in the `str` argument matches the `check`
+string case sensitively. This is *not* the same return code as `strcmp`.
+
+## `Curl_str_nudge`
+
+~~~c
+int Curl_str_nudge(struct Curl_str *str, size_t num);
+~~~
+
+Removes `num` bytes from the beginning (left) of the string kept in `str`. If
+`num` is larger than the string, it instead returns an error.

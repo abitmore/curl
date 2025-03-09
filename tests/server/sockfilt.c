@@ -85,7 +85,9 @@
  * it!
  */
 
+#ifndef UNDER_CE
 #include <signal.h>
+#endif
 #ifdef HAVE_NETINET_IN_H
 #include <netinet/in.h>
 #endif
@@ -112,37 +114,14 @@
 /* include memdebug.h last */
 #include "memdebug.h"
 
-#ifdef USE_WINSOCK
-#undef  EINTR
-#define EINTR    4 /* errno.h value */
-#undef  EAGAIN
-#define EAGAIN  11 /* errno.h value */
-#undef  ENOMEM
-#define ENOMEM  12 /* errno.h value */
-#undef  EINVAL
-#define EINVAL  22 /* errno.h value */
-#endif
-
-#define DEFAULT_PORT 8999
-
-#ifndef DEFAULT_LOGFILE
-#define DEFAULT_LOGFILE "log/sockfilt.log"
-#endif
-
 /* buffer is this excessively large only to be able to support things like
   test 1003 which tests exceedingly large server response lines */
 #define BUFFER_SIZE 17010
 
-const char *serverlogfile = DEFAULT_LOGFILE;
-
 static bool verbose = FALSE;
-static bool bind_only = FALSE;
-#ifdef USE_IPV6
-static bool use_ipv6 = FALSE;
-#endif
-static const char *ipv_inuse = "IPv4";
-static unsigned short port = DEFAULT_PORT;
-static unsigned short connectport = 0; /* if non-zero, we activate this mode */
+static bool s_bind_only = FALSE;
+static unsigned short server_connectport = 0; /* if non-zero,
+                                                 we activate this mode */
 
 enum sockmode {
   PASSIVE_LISTEN,    /* as a server waiting for connections */
@@ -151,7 +130,7 @@ enum sockmode {
   ACTIVE_DISCONNECT  /* as a client, disconnected from server */
 };
 
-#if defined(_WIN32) && !defined(CURL_WINDOWS_UWP)
+#if defined(_WIN32) && !defined(CURL_WINDOWS_UWP) && !defined(UNDER_CE)
 /*
  * read-wrapper to support reading from stdin on Windows.
  */
@@ -178,7 +157,7 @@ static ssize_t read_wincon(int fd, void *buf, size_t count)
     return rcount;
   }
 
-  errno = (int)GetLastError();
+  CURL_SETERRNO((int)GetLastError());
   return -1;
 }
 #undef  read
@@ -213,12 +192,14 @@ static ssize_t write_wincon(int fd, const void *buf, size_t count)
     return wcount;
   }
 
-  errno = (int)GetLastError();
+  CURL_SETERRNO((int)GetLastError());
   return -1;
 }
 #undef  write
 #define write(a,b,c) write_wincon(a,b,c)
 #endif
+
+#ifndef UNDER_CE
 
 /* On Windows, we sometimes get this for a broken pipe, seemingly
  * when the client just closed stdin? */
@@ -255,7 +236,7 @@ static ssize_t fullread(int filedes, void *buffer, size_t nbytes)
         return 0;
       }
       logmsg("reading from file descriptor: %d,", filedes);
-      logmsg("unrecoverable read() failure: (%d) %s",
+      logmsg("unrecoverable read() failure (%d) %s",
              error, strerror(error));
       return -1;
     }
@@ -301,7 +282,7 @@ static ssize_t fullwrite(int filedes, const void *buffer, size_t nbytes)
       if((error == EINTR) || (error == EAGAIN))
         continue;
       logmsg("writing to file descriptor: %d,", filedes);
-      logmsg("unrecoverable write() failure: (%d) %s",
+      logmsg("unrecoverable write() failure (%d) %s",
              error, strerror(error));
       return -1;
     }
@@ -337,6 +318,7 @@ static bool read_stdin(void *buffer, size_t nbytes)
   }
   return TRUE;
 }
+#endif
 
 /*
  * write_stdout tries to write to stdio nbytes from the given buffer. This is a
@@ -347,7 +329,13 @@ static bool read_stdin(void *buffer, size_t nbytes)
 
 static bool write_stdout(const void *buffer, size_t nbytes)
 {
-  ssize_t nwrite = fullwrite(fileno(stdout), buffer, nbytes);
+  ssize_t nwrite;
+#ifdef UNDER_CE
+  puts(buffer);
+  nwrite = nbytes;
+#else
+  nwrite = fullwrite(fileno(stdout), buffer, nbytes);
+#endif
   if(nwrite != (ssize_t)nbytes) {
     logmsg("exiting...");
     return FALSE;
@@ -355,6 +343,7 @@ static bool write_stdout(const void *buffer, size_t nbytes)
   return TRUE;
 }
 
+#ifndef UNDER_CE
 static void lograw(unsigned char *buffer, ssize_t len)
 {
   char data[120];
@@ -413,7 +402,7 @@ static bool read_data_block(unsigned char *buffer, ssize_t maxlen,
 
   *buffer_len = (ssize_t)strtol((char *)buffer, NULL, 16);
   if(*buffer_len > maxlen) {
-    logmsg("ERROR: Buffer size (%zd bytes) too small for data size "
+    logmsg("Buffer size (%zd bytes) too small for data size error "
            "(%zd bytes)", maxlen, *buffer_len);
     return FALSE;
   }
@@ -426,9 +415,10 @@ static bool read_data_block(unsigned char *buffer, ssize_t maxlen,
 
   return TRUE;
 }
+#endif
 
 
-#if defined(USE_WINSOCK) && !defined(CURL_WINDOWS_UWP)
+#if defined(USE_WINSOCK) && !defined(CURL_WINDOWS_UWP) && !defined(UNDER_CE)
 /*
  * Winsock select() does not support standard file descriptors,
  * it can only check SOCKETs. The following function is an attempt
@@ -446,12 +436,8 @@ struct select_ws_wait_data {
   HANDLE signal; /* internal event to signal handle trigger */
   HANDLE abort;  /* internal event to abort waiting threads */
 };
-#ifdef _WIN32_WCE
-static DWORD WINAPI select_ws_wait_thread(LPVOID lpParameter)
-#else
 #include <process.h>
 static unsigned int WINAPI select_ws_wait_thread(void *lpParameter)
-#endif
 {
   struct select_ws_wait_data *data;
   HANDLE signal, handle, handles[2];
@@ -566,7 +552,7 @@ static unsigned int WINAPI select_ws_wait_thread(void *lpParameter)
           /* if the pipe has NOT been closed, sleep and continue waiting */
           ret = GetLastError();
           if(ret != ERROR_BROKEN_PIPE) {
-            logmsg("[select_ws_wait_thread] PeekNamedPipe error: %lu", ret);
+            logmsg("[select_ws_wait_thread] PeekNamedPipe error (%lu)", ret);
             SleepEx(0, FALSE);
             continue;
           }
@@ -594,11 +580,7 @@ static unsigned int WINAPI select_ws_wait_thread(void *lpParameter)
 }
 static HANDLE select_ws_wait(HANDLE handle, HANDLE signal, HANDLE abort)
 {
-#ifdef _WIN32_WCE
-  typedef HANDLE curl_win_thread_handle_t;
-#else
   typedef uintptr_t curl_win_thread_handle_t;
-#endif
   struct select_ws_wait_data *data;
   curl_win_thread_handle_t thread;
 
@@ -610,11 +592,7 @@ static HANDLE select_ws_wait(HANDLE handle, HANDLE signal, HANDLE abort)
     data->abort = abort;
 
     /* launch waiting thread */
-#ifdef _WIN32_WCE
-    thread = CreateThread(NULL, 0,  &select_ws_wait_thread, data, 0, NULL);
-#else
     thread = _beginthreadex(NULL, 0, &select_ws_wait_thread, data, 0, NULL);
-#endif
 
     /* free data if thread failed to launch */
     if(!thread) {
@@ -646,7 +624,7 @@ static int select_ws(int nfds, fd_set *readfds, fd_set *writefds,
 
   /* check if the input value is valid */
   if(nfds < 0) {
-    errno = EINVAL;
+    CURL_SETERRNO(EINVAL);
     return -1;
   }
 
@@ -667,7 +645,7 @@ static int select_ws(int nfds, fd_set *readfds, fd_set *writefds,
   /* create internal event to abort waiting threads */
   abort = CreateEvent(NULL, TRUE, FALSE, NULL);
   if(!abort) {
-    errno = ENOMEM;
+    CURL_SETERRNO(ENOMEM);
     return -1;
   }
 
@@ -675,7 +653,7 @@ static int select_ws(int nfds, fd_set *readfds, fd_set *writefds,
   data = calloc(nfds, sizeof(struct select_ws_data));
   if(!data) {
     CloseHandle(abort);
-    errno = ENOMEM;
+    CURL_SETERRNO(ENOMEM);
     return -1;
   }
 
@@ -684,7 +662,7 @@ static int select_ws(int nfds, fd_set *readfds, fd_set *writefds,
   if(!handles) {
     CloseHandle(abort);
     free(data);
-    errno = ENOMEM;
+    CURL_SETERRNO(ENOMEM);
     return -1;
   }
 
@@ -900,6 +878,7 @@ static int select_ws(int nfds, fd_set *readfds, fd_set *writefds,
 #endif  /* USE_WINSOCK */
 
 
+#ifndef UNDER_CE
 /* Perform the disconnect handshake with sockfilt
  * This involves waiting for the disconnect acknowledgment after the DISC
  * command, while throwing away anything else that might come in before
@@ -940,7 +919,7 @@ static bool disc_handshake(void)
         return FALSE;
       }
       else {
-        logmsg("Error: unexpected message; aborting");
+        logmsg("Unexpected message error; aborting");
         /*
          * The only other messages that could occur here are PING and PORT,
          * and both of them occur at the start of a test when nothing should be
@@ -954,6 +933,7 @@ static bool disc_handshake(void)
   } while(TRUE);
   return TRUE;
 }
+#endif
 
 /*
   sockfdp is a pointer to an established stream or CURL_SOCKET_BAD
@@ -965,6 +945,12 @@ static bool juggle(curl_socket_t *sockfdp,
                    curl_socket_t listenfd,
                    enum sockmode *mode)
 {
+#ifdef UNDER_CE
+  (void)sockfdp;
+  (void)listenfd;
+  (void)mode;
+  return FALSE;
+#else
   struct timeval timeout;
   fd_set fds_read;
   fd_set fds_write;
@@ -1089,11 +1075,11 @@ static bool juggle(curl_socket_t *sockfdp,
       return FALSE;
     }
 
-  } while((rc == -1) && ((error = errno) == EINTR));
+  } while((rc == -1) && ((error = SOCKERRNO) == SOCKEINTR));
 
   if(rc < 0) {
-    logmsg("select() failed with error: (%d) %s",
-           error, strerror(error));
+    logmsg("select() failed with error (%d) %s",
+           error, sstrerror(error));
     return FALSE;
   }
 
@@ -1134,7 +1120,8 @@ static bool juggle(curl_socket_t *sockfdp,
     else if(!memcmp("PORT", buffer, 4)) {
       /* Question asking us what PORT number we are listening to.
          Replies to PORT with "IPv[num]/[port]" */
-      msnprintf((char *)buffer, sizeof(buffer), "%s/%hu\n", ipv_inuse, port);
+      msnprintf((char *)buffer, sizeof(buffer), "%s/%hu\n",
+                ipv_inuse, server_port);
       buffer_len = (ssize_t)strlen((char *)buffer);
       msnprintf(data, sizeof(data), "PORT\n%04zx\n", buffer_len);
       if(!write_stdout(data, 10))
@@ -1195,7 +1182,7 @@ static bool juggle(curl_socket_t *sockfdp,
       if(CURL_SOCKET_BAD == newfd) {
         error = SOCKERRNO;
         logmsg("accept(%" FMT_SOCKET_T ", NULL, NULL) "
-               "failed with error: (%d) %s", sockfd, error, sstrerror(error));
+               "failed with error (%d) %s", sockfd, error, sstrerror(error));
       }
       else {
         logmsg("====> Client connect");
@@ -1236,10 +1223,12 @@ static bool juggle(curl_socket_t *sockfdp,
   }
 
   return TRUE;
+#endif
 }
 
-static curl_socket_t sockdaemon(curl_socket_t sock,
-                                unsigned short *listenport)
+static curl_socket_t sockfilt_sockdaemon(curl_socket_t sock,
+                                         unsigned short *listenport,
+                                         bool bind_only)
 {
   /* passive daemon style */
   srvr_sockaddr_union_t listener;
@@ -1258,15 +1247,15 @@ static curl_socket_t sockdaemon(curl_socket_t sock,
          (void *)&flag, sizeof(flag));
     if(rc) {
       error = SOCKERRNO;
-      logmsg("setsockopt(SO_REUSEADDR) failed with error: (%d) %s",
+      logmsg("setsockopt(SO_REUSEADDR) failed with error (%d) %s",
              error, sstrerror(error));
       if(maxretr) {
         rc = wait_ms(delay);
         if(rc) {
           /* should not happen */
-          error = errno;
-          logmsg("wait_ms() failed with error: (%d) %s",
-                 error, strerror(error));
+          error = SOCKERRNO;
+          logmsg("wait_ms() failed with error (%d) %s",
+                 error, sstrerror(error));
           sclose(sock);
           return CURL_SOCKET_BAD;
         }
@@ -1282,7 +1271,7 @@ static curl_socket_t sockdaemon(curl_socket_t sock,
   } while(rc && maxretr--);
 
   if(rc) {
-    logmsg("setsockopt(SO_REUSEADDR) failed %d times in %d ms. Error: (%d) %s",
+    logmsg("setsockopt(SO_REUSEADDR) failed %d times in %d ms. Error (%d) %s",
            attempt, totdelay, error, strerror(error));
     logmsg("Continuing anyway...");
   }
@@ -1310,7 +1299,7 @@ static curl_socket_t sockdaemon(curl_socket_t sock,
 #endif /* USE_IPV6 */
   if(rc) {
     error = SOCKERRNO;
-    logmsg("Error binding socket on port %hu: (%d) %s",
+    logmsg("Error binding socket on port %hu (%d) %s",
            *listenport, error, sstrerror(error));
     sclose(sock);
     return CURL_SOCKET_BAD;
@@ -1332,7 +1321,7 @@ static curl_socket_t sockdaemon(curl_socket_t sock,
     memset(&localaddr.sa, 0, (size_t)la_size);
     if(getsockname(sock, &localaddr.sa, &la_size) < 0) {
       error = SOCKERRNO;
-      logmsg("getsockname() failed with error: (%d) %s",
+      logmsg("getsockname() failed with error (%d) %s",
              error, sstrerror(error));
       sclose(sock);
       return CURL_SOCKET_BAD;
@@ -1370,7 +1359,7 @@ static curl_socket_t sockdaemon(curl_socket_t sock,
   rc = listen(sock, 5);
   if(0 != rc) {
     error = SOCKERRNO;
-    logmsg("listen(%" FMT_SOCKET_T ", 5) failed with error: (%d) %s",
+    logmsg("listen(%" FMT_SOCKET_T ", 5) failed with error (%d) %s",
            sock, error, sstrerror(error));
     sclose(sock);
     return CURL_SOCKET_BAD;
@@ -1387,14 +1376,16 @@ int main(int argc, char *argv[])
   curl_socket_t msgsock = CURL_SOCKET_BAD;
   int wrotepidfile = 0;
   int wroteportfile = 0;
-  const char *pidname = ".sockfilt.pid";
-  const char *portname = NULL; /* none by default */
   bool juggle_again;
   int rc;
   int error;
   int arg = 1;
   enum sockmode mode = PASSIVE_LISTEN; /* default */
   const char *addr = NULL;
+
+  pidname = ".sockfilt.pid";
+  serverlogfile = "log/sockfilt.log";
+  server_port = 8999;
 
   while(argc > arg) {
     if(!strcmp("--version", argv[arg])) {
@@ -1442,7 +1433,7 @@ int main(int argc, char *argv[])
       arg++;
     }
     else if(!strcmp("--bindonly", argv[arg])) {
-      bind_only = TRUE;
+      s_bind_only = TRUE;
       arg++;
     }
     else if(!strcmp("--port", argv[arg])) {
@@ -1450,7 +1441,7 @@ int main(int argc, char *argv[])
       if(argc > arg) {
         char *endptr;
         unsigned long ulnum = strtoul(argv[arg], &endptr, 10);
-        port = curlx_ultous(ulnum);
+        server_port = util_ultous(ulnum);
         arg++;
       }
     }
@@ -1467,7 +1458,7 @@ int main(int argc, char *argv[])
                   argv[arg]);
           return 0;
         }
-        connectport = curlx_ultous(ulnum);
+        server_connectport = util_ultous(ulnum);
         arg++;
       }
     }
@@ -1497,8 +1488,8 @@ int main(int argc, char *argv[])
   }
 
 #ifdef _WIN32
-  win32_init();
-  atexit(win32_cleanup);
+  if(win32_init())
+    return 2;
 #endif
 
   CURL_SET_BINMODE(stdin);
@@ -1518,12 +1509,12 @@ int main(int argc, char *argv[])
 
   if(CURL_SOCKET_BAD == sock) {
     error = SOCKERRNO;
-    logmsg("Error creating socket: (%d) %s", error, sstrerror(error));
+    logmsg("Error creating socket (%d) %s", error, sstrerror(error));
     write_stdout("FAIL\n", 5);
     goto sockfilt_cleanup;
   }
 
-  if(connectport) {
+  if(server_connectport) {
     /* Active mode, we should connect to the given port number */
     mode = ACTIVE;
 #ifdef USE_IPV6
@@ -1531,7 +1522,7 @@ int main(int argc, char *argv[])
 #endif
       memset(&me.sa4, 0, sizeof(me.sa4));
       me.sa4.sin_family = AF_INET;
-      me.sa4.sin_port = htons(connectport);
+      me.sa4.sin_port = htons(server_connectport);
       me.sa4.sin_addr.s_addr = INADDR_ANY;
       if(!addr)
         addr = "127.0.0.1";
@@ -1543,7 +1534,7 @@ int main(int argc, char *argv[])
     else {
       memset(&me.sa6, 0, sizeof(me.sa6));
       me.sa6.sin6_family = AF_INET6;
-      me.sa6.sin6_port = htons(connectport);
+      me.sa6.sin6_port = htons(server_connectport);
       if(!addr)
         addr = "::1";
       Curl_inet_pton(AF_INET6, addr, &me.sa6.sin6_addr);
@@ -1553,8 +1544,8 @@ int main(int argc, char *argv[])
 #endif /* USE_IPV6 */
     if(rc) {
       error = SOCKERRNO;
-      logmsg("Error connecting to port %hu: (%d) %s",
-             connectport, error, sstrerror(error));
+      logmsg("Error connecting to port %hu (%d) %s",
+             server_connectport, error, sstrerror(error));
       write_stdout("FAIL\n", 5);
       goto sockfilt_cleanup;
     }
@@ -1563,7 +1554,7 @@ int main(int argc, char *argv[])
   }
   else {
     /* passive daemon style */
-    sock = sockdaemon(sock, &port);
+    sock = sockfilt_sockdaemon(sock, &server_port, s_bind_only);
     if(CURL_SOCKET_BAD == sock) {
       write_stdout("FAIL\n", 5);
       goto sockfilt_cleanup;
@@ -1573,12 +1564,12 @@ int main(int argc, char *argv[])
 
   logmsg("Running %s version", ipv_inuse);
 
-  if(connectport)
-    logmsg("Connected to port %hu", connectport);
-  else if(bind_only)
-    logmsg("Bound without listening on port %hu", port);
+  if(server_connectport)
+    logmsg("Connected to port %hu", server_connectport);
+  else if(s_bind_only)
+    logmsg("Bound without listening on port %hu", server_port);
   else
-    logmsg("Listening on port %hu", port);
+    logmsg("Listening on port %hu", server_port);
 
   wrotepidfile = write_pidfile(pidname);
   if(!wrotepidfile) {
@@ -1586,7 +1577,7 @@ int main(int argc, char *argv[])
     goto sockfilt_cleanup;
   }
   if(portname) {
-    wroteportfile = write_portfile(portname, port);
+    wroteportfile = write_portfile(portname, server_port);
     if(!wroteportfile) {
       write_stdout("FAIL\n", 5);
       goto sockfilt_cleanup;

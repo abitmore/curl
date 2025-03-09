@@ -65,6 +65,27 @@ static ParameterError getstr(char **str, const char *val, bool allowblank)
   return PARAM_OK;
 }
 
+static ParameterError getstrn(char **str, const char *val,
+                              size_t len, bool allowblank)
+{
+  if(*str) {
+    free(*str);
+    *str = NULL;
+  }
+  if(val) {
+    if(!allowblank && !val[0])
+      return PARAM_BLANK_STRING;
+
+    *str = malloc(len + 1);
+    if(!*str)
+      return PARAM_NO_MEM;
+
+    memcpy(*str, val, len);
+    (*str)[len] = 0; /* null terminate */
+  }
+  return PARAM_OK;
+}
+
 /* this array MUST be alphasorted based on the 'lname' */
 static const struct LongShort aliases[]= {
   {"abstract-unix-socket",       ARG_FILE, ' ', C_ABSTRACT_UNIX_SOCKET},
@@ -339,6 +360,7 @@ static const struct LongShort aliases[]= {
   {"trace-time",                 ARG_BOOL, ' ', C_TRACE_TIME},
   {"unix-socket",                ARG_FILE, ' ', C_UNIX_SOCKET},
   {"upload-file",                ARG_FILE, 'T', C_UPLOAD_FILE},
+  {"upload-flags",               ARG_STRG, ' ', C_UPLOAD_FLAGS},
   {"url",                        ARG_STRG, ' ', C_URL},
   {"url-query",                  ARG_STRG, ' ', C_URL_QUERY},
   {"use-ascii",                  ARG_BOOL, 'B', C_USE_ASCII},
@@ -485,7 +507,7 @@ static size_t replace_url_encoded_space_by_plus(char *url)
 }
 
 static void
-GetFileAndPassword(char *nextarg, char **file, char **password)
+GetFileAndPassword(const char *nextarg, char **file, char **password)
 {
   char *certname, *passphrase;
   if(nextarg) {
@@ -571,7 +593,7 @@ static void cleanarg(argv_item_t str)
 
 /* --data-urlencode */
 static ParameterError data_urlencode(struct GlobalConfig *global,
-                                     char *nextarg,
+                                     const char *nextarg,
                                      char **postp,
                                      size_t *lenp)
 {
@@ -684,28 +706,31 @@ static void sethttpver(struct GlobalConfig *global,
 }
 
 static CURLcode set_trace_config(struct GlobalConfig *global,
-                                 const char *config)
+                                 const char *token)
 {
   CURLcode result = CURLE_OK;
-  char *token, *tmp, *name;
+  const char *next, *name;
   bool toggle;
 
-  tmp = strdup(config);
-  if(!tmp)
-    return CURLE_OUT_OF_MEMORY;
-
-  /* Allow strtok() here since this is not used threaded */
-  /* !checksrc! disable BANNEDFUNC 2 */
-  token = strtok(tmp, ", ");
   while(token) {
+    size_t len;
+    next = strchr(token, ',');
+
+    if(next)
+      len = next - token;
+    else
+      len = strlen(token);
+
     switch(*token) {
       case '-':
         toggle = FALSE;
         name = token + 1;
+        len--;
         break;
       case '+':
         toggle = TRUE;
         name = token + 1;
+        len--;
         break;
       default:
         toggle = TRUE;
@@ -713,28 +738,35 @@ static CURLcode set_trace_config(struct GlobalConfig *global,
         break;
     }
 
-    if(strcasecompare(name, "all")) {
+    if((len == 3) && strncasecompare(name, "all", 3)) {
       global->traceids = toggle;
       global->tracetime = toggle;
       result = curl_global_trace(token);
       if(result)
         goto out;
     }
-    else if(strcasecompare(name, "ids")) {
+    else if((len == 3) && strncasecompare(name, "ids", 3)) {
       global->traceids = toggle;
     }
-    else if(strcasecompare(name, "time")) {
+    else if((len == 4) && strncasecompare(name, "time", 4)) {
       global->tracetime = toggle;
     }
     else {
-      result = curl_global_trace(token);
+      char buffer[32];
+      msnprintf(buffer, sizeof(buffer), "%c%.*s", toggle ? '+' : '-',
+                (int)len, name);
+      result = curl_global_trace(buffer);
       if(result)
         goto out;
     }
-    token = strtok(NULL, ", ");
+    if(next) {
+      next++;
+      if(*next == ' ')
+        next++;
+    }
+    token = next;
   }
 out:
-  free(tmp);
   return result;
 }
 
@@ -754,7 +786,7 @@ const struct LongShort *findshortopt(char letter)
 
   if(!singles_done) {
     unsigned int j;
-    for(j = 0; j < sizeof(aliases)/sizeof(aliases[0]); j++) {
+    for(j = 0; j < CURL_ARRAYSIZE(aliases); j++) {
       if(aliases[j].letter != ' ') {
         unsigned char l = (unsigned char)aliases[j].letter;
         singles[l - ' '] = &aliases[j];
@@ -812,7 +844,7 @@ static int find_tos(const void *a, const void *b)
 }
 
 #define MAX_QUERY_LEN 100000 /* larger is not likely to ever work */
-static ParameterError url_query(char *nextarg,
+static ParameterError url_query(const char *nextarg,
                                 struct GlobalConfig *global,
                                 struct OperationConfig *config)
 {
@@ -849,7 +881,7 @@ static ParameterError url_query(char *nextarg,
 }
 
 static ParameterError set_data(cmdline_t cmd,
-                               char *nextarg,
+                               const char *nextarg,
                                struct GlobalConfig *global,
                                struct OperationConfig *config)
 {
@@ -930,7 +962,7 @@ static ParameterError set_data(cmdline_t cmd,
 }
 
 static ParameterError set_rate(struct GlobalConfig *global,
-                               char *nextarg)
+                               const char *nextarg)
 {
   /* --rate */
   /* support a few different suffixes, extract the suffix first, then
@@ -1016,13 +1048,14 @@ const struct LongShort *findlongopt(const char *opt)
   struct LongShort key;
   key.lname = opt;
 
-  return bsearch(&key, aliases, sizeof(aliases)/sizeof(aliases[0]),
+  return bsearch(&key, aliases, CURL_ARRAYSIZE(aliases),
                  sizeof(aliases[0]), findarg);
 }
 
-static ParameterError parse_url(struct GlobalConfig *global,
-                                struct OperationConfig *config,
-                                const char *nextarg)
+static ParameterError add_url(struct GlobalConfig *global,
+                              struct OperationConfig *config,
+                              const char *thisurl,
+                              int extraflags)
 {
   ParameterError err = PARAM_OK;
   struct getout *url;
@@ -1050,10 +1083,10 @@ static ParameterError parse_url(struct GlobalConfig *global,
     return PARAM_NO_MEM;
   else {
     /* fill in the URL */
-    err = getstr(&url->url, nextarg, DENY_BLANK);
-    url->flags |= GETOUT_URL;
-    if(!err && (++config->num_urls > 1) && (config->etag_save_file ||
-                                            config->etag_compare_file)) {
+    err = getstr(&url->url, thisurl, DENY_BLANK);
+    url->flags |= GETOUT_URL | extraflags;
+    if(!err && (++config->num_urls > 1) &&
+       (config->etag_save_file || config->etag_compare_file)) {
       errorf(global, "The etag options only work on a single URL");
       return PARAM_BAD_USE;
     }
@@ -1061,27 +1094,66 @@ static ParameterError parse_url(struct GlobalConfig *global,
   return err;
 }
 
-static ParameterError parse_localport(struct OperationConfig *config,
-                                      char *nextarg)
+static ParameterError parse_url(struct GlobalConfig *global,
+                                struct OperationConfig *config,
+                                const char *nextarg)
 {
-  char *pp = NULL;
-  char *p = nextarg;
+  if(nextarg && (nextarg[0] == '@')) {
+    /* read URLs from a file, treat all as -O */
+    struct curlx_dynbuf line;
+    ParameterError err = PARAM_OK;
+    bool error = FALSE;
+    bool fromstdin = !strcmp("-", &nextarg[1]);
+    FILE *f;
+
+    if(fromstdin)
+      f = stdin;
+    else
+      f = fopen(&nextarg[1], FOPEN_READTEXT);
+    if(f) {
+      curlx_dyn_init(&line, 8092);
+      while(my_get_line(f, &line, &error)) {
+        const char *ptr = curlx_dyn_ptr(&line);
+        err = add_url(global, config, ptr, GETOUT_USEREMOTE | GETOUT_NOGLOB);
+        if(err)
+          break;
+      }
+      if(!fromstdin)
+        fclose(f);
+      curlx_dyn_free(&line);
+      if(error || err)
+        return PARAM_READ_ERROR;
+      return PARAM_OK;
+    }
+    return PARAM_READ_ERROR; /* file not found */
+  }
+  return add_url(global, config, nextarg, 0);
+}
+
+
+static ParameterError parse_localport(struct OperationConfig *config,
+                                      const char *nextarg)
+{
+  const char *pp = NULL;
+  const char *p = nextarg;
+  char buffer[22];
+  size_t plen = 0;
   while(ISDIGIT(*p))
     p++;
+  plen = p - nextarg;
   if(*p) {
     pp = p;
     /* check for ' - [end]' */
-    if(ISSPACE(*pp))
+    if(ISBLANK(*pp))
       pp++;
     if(*pp != '-')
       return PARAM_BAD_USE;
     pp++;
-    if(*pp && ISSPACE(*pp))
+    if(ISBLANK(*pp))
       pp++;
-    *p = 0; /* null-terminate to make str2unum() work below */
   }
-
-  if(str2unummax(&config->localport, nextarg, 65535))
+  msnprintf(buffer, sizeof(buffer), "%.*s", (int)plen, nextarg);
+  if(str2unummax(&config->localport, buffer, 65535))
     return PARAM_BAD_USE;
   if(!pp)
     config->localportrange = 1; /* default number of ports to try */
@@ -1190,8 +1262,6 @@ static ParameterError parse_header(struct GlobalConfig *global,
   /* A custom header to append to a list */
   if(nextarg[0] == '@') {
     /* read many headers from a file or stdin */
-    char *string;
-    size_t len;
     bool use_stdin = !strcmp(&nextarg[1], "-");
     FILE *file = use_stdin ? stdin : fopen(&nextarg[1], FOPEN_READTEXT);
     if(!file) {
@@ -1199,22 +1269,20 @@ static ParameterError parse_header(struct GlobalConfig *global,
       err = PARAM_READ_ERROR;
     }
     else {
-      err = file2memory(&string, &len, file);
-      if(!err && string) {
-        /* Allow strtok() here since this is not used threaded */
-        /* !checksrc! disable BANNEDFUNC 2 */
-        char *h = strtok(string, "\r\n");
-        while(h) {
-          if(cmd == C_PROXY_HEADER) /* --proxy-header */
-            err = add2list(&config->proxyheaders, h);
-          else
-            err = add2list(&config->headers, h);
-          if(err)
-            break;
-          h = strtok(NULL, "\r\n");
-        }
-        free(string);
+      struct dynbuf line;
+      bool error = FALSE;
+      curlx_dyn_init(&line, 1024*100);
+      while(my_get_line(file, &line, &error)) {
+        const char *ptr = curlx_dyn_ptr(&line);
+        err = add2list(cmd == C_PROXY_HEADER ? /* --proxy-header? */
+                       &config->proxyheaders :
+                       &config->headers, ptr);
+        if(err)
+          break;
       }
+      if(error)
+        err = PARAM_READ_ERROR;
+      curlx_dyn_free(&line);
       if(!use_stdin)
         fclose(file);
     }
@@ -1321,7 +1389,7 @@ static ParameterError parse_quote(struct OperationConfig *config,
     /* prefixed with a plus makes it a just-before-transfer one */
     nextarg++;
     err = add2list(&config->prequote, nextarg);
-        break;
+    break;
   default:
     err = add2list(&config->quote, nextarg);
     break;
@@ -1562,9 +1630,70 @@ static ParameterError parse_time_cond(struct GlobalConfig *global,
   return err;
 }
 
+struct flagmap {
+  const char *name;
+  size_t len;
+  unsigned char flag;
+};
+
+static const struct flagmap flag_table[] = {
+  {"answered", 8, CURLULFLAG_ANSWERED},
+  {"deleted",  7, CURLULFLAG_DELETED},
+  {"draft",    5, CURLULFLAG_DRAFT},
+  {"flagged",  7, CURLULFLAG_FLAGGED},
+  {"seen",     4, CURLULFLAG_SEEN},
+  {NULL,       0, 0}
+};
+
+static ParameterError parse_upload_flags(struct OperationConfig *config,
+                                         const char *flag)
+{
+  ParameterError err = PARAM_OK;
+
+  while(flag) {
+    bool negate;
+    const struct flagmap *map;
+    size_t len;
+    char *next = strchr(flag, ','); /* Find next comma or end */
+    if(next)
+      len = next - flag;
+    else
+      len = strlen(flag);
+
+    negate = (*flag == '-');
+    if(negate) {
+      flag++;
+      len--;
+    }
+
+    for(map = flag_table; map->name; map++) {
+      if((len == map->len) && !strncmp(flag, map->name, map->len)) {
+        if(negate)
+          config->upload_flags &= (unsigned char)~map->flag;
+        else
+          config->upload_flags |= map->flag;
+        break;
+      }
+    }
+
+   if(!map->name) {
+     err = PARAM_OPTION_UNKNOWN;
+     break;
+   }
+
+   if(next)
+     /* move over the comma */
+     next++;
+   flag = next;
+  }
+
+  return err;
+}
+
 ParameterError getparameter(const char *flag, /* f or -long-flag */
-                            char *nextarg,    /* NULL if unset */
-                            argv_item_t cleararg,
+                            const char *nextarg,    /* NULL if unset */
+                            argv_item_t cleararg1,
+                            argv_item_t cleararg2,
                             bool *usedarg,    /* set to TRUE if the arg
                                                  has been used */
                             struct GlobalConfig *global,
@@ -1590,7 +1719,8 @@ ParameterError getparameter(const char *flag, /* f or -long-flag */
 #ifdef HAVE_WRITABLE_ARGV
   argv_item_t clearthis = NULL;
 #else
-  (void)cleararg;
+  (void)cleararg1;
+  (void)cleararg2;
 #endif
 
   *usedarg = FALSE; /* default is that we do not use the arg */
@@ -1669,6 +1799,9 @@ ParameterError getparameter(const char *flag, /* f or -long-flag */
       if(!longopt && parse[1]) {
         nextarg = (char *)&parse[1]; /* this is the actual extra parameter */
         singleopt = TRUE;   /* do not loop anymore after this */
+#ifdef HAVE_WRITABLE_ARGV
+        clearthis = &cleararg1[parse + 2 - flag];
+#endif
       }
       else if(!nextarg) {
         err = PARAM_REQUIRES_PARAMETER;
@@ -1676,7 +1809,7 @@ ParameterError getparameter(const char *flag, /* f or -long-flag */
       }
       else {
 #ifdef HAVE_WRITABLE_ARGV
-        clearthis = cleararg;
+        clearthis = cleararg2;
 #endif
         *usedarg = TRUE; /* mark it as used */
       }
@@ -1961,7 +2094,7 @@ ParameterError getparameter(const char *flag, /* f or -long-flag */
       const struct TOSEntry *entry;
       find.name = nextarg;
       entry = bsearch(&find, tos_entries,
-                      sizeof(tos_entries)/sizeof(*tos_entries),
+                      CURL_ARRAYSIZE(tos_entries),
                       sizeof(*tos_entries), find_tos);
       if(entry)
         config->ip_tos = entry->value;
@@ -2339,17 +2472,20 @@ ParameterError getparameter(const char *flag, /* f or -long-flag */
       err = getstr(&config->headerfile, nextarg, DENY_BLANK);
       break;
     case C_REFERER: { /* --referer */
-      char *ptr = strstr(nextarg, ";auto");
+      const char *ptr = strstr(nextarg, ";auto");
+      size_t len;
       if(ptr) {
         /* Automatic referer requested, this may be combined with a
            set initial one */
         config->autoreferer = TRUE;
-        *ptr = 0; /* null-terminate here */
+        len = ptr - nextarg;
       }
-      else
+      else {
         config->autoreferer = FALSE;
-      ptr = *nextarg ? nextarg : NULL;
-      err = getstr(&config->referer, ptr, ALLOW_BLANK);
+        len = strlen(nextarg);
+      }
+      ptr = len ? nextarg : NULL;
+      err = getstrn(&config->referer, ptr, len, ALLOW_BLANK);
     }
       break;
     case C_CERT: /* --cert */
@@ -2709,7 +2845,7 @@ ParameterError getparameter(const char *flag, /* f or -long-flag */
     case C_BUFFER: /* --buffer */
       /* disable the output I/O buffering. note that the option is called
          --buffer but is mostly used in the negative form: --no-buffer */
-      config->nobuffer = longopt ? !toggle : TRUE;
+      config->nobuffer = (bool)(longopt ? !toggle : TRUE);
       break;
     case C_REMOTE_NAME_ALL: /* --remote-name-all */
       config->default_node_flags = toggle ? GETOUT_USEREMOTE : 0;
@@ -2844,6 +2980,9 @@ ParameterError getparameter(const char *flag, /* f or -long-flag */
     case C_MPTCP: /* --mptcp */
       config->mptcp = TRUE;
       break;
+    case C_UPLOAD_FLAGS: /* --upload-flags */
+      err = parse_upload_flags(config, nextarg);
+      break;
     default: /* unknown flag */
       err = PARAM_OPTION_UNKNOWN;
       break;
@@ -2854,7 +2993,7 @@ ParameterError getparameter(const char *flag, /* f or -long-flag */
 
 error:
   if(nextalloc)
-    free(nextarg);
+    free((char *)nextarg);
   return err;
 }
 
@@ -2863,12 +3002,12 @@ ParameterError parse_args(struct GlobalConfig *global, int argc,
 {
   int i;
   bool stillflags;
-  char *orig_opt = NULL;
+  const char *orig_opt = NULL;
   ParameterError result = PARAM_OK;
   struct OperationConfig *config = global->first;
 
   for(i = 1, stillflags = TRUE; i < argc && !result; i++) {
-    orig_opt = curlx_convert_tchar_to_UTF8(argv[i]);
+    orig_opt = convert_tchar_to_UTF8(argv[i]);
     if(!orig_opt)
       return PARAM_NO_MEM;
 
@@ -2880,19 +3019,19 @@ ParameterError parse_args(struct GlobalConfig *global, int argc,
            following (URL) argument to start with -. */
         stillflags = FALSE;
       else {
-        char *nextarg = NULL;
+        const char *nextarg = NULL;
         if(i < (argc - 1)) {
-          nextarg = curlx_convert_tchar_to_UTF8(argv[i + 1]);
+          nextarg = convert_tchar_to_UTF8(argv[i + 1]);
           if(!nextarg) {
-            curlx_unicodefree(orig_opt);
+            unicodefree(orig_opt);
             return PARAM_NO_MEM;
           }
         }
 
-        result = getparameter(orig_opt, nextarg, argv[i + 1], &passarg,
-                              global, config);
+        result = getparameter(orig_opt, nextarg, argv[i], argv[i + 1],
+                              &passarg, global, config);
 
-        curlx_unicodefree(nextarg);
+        unicodefree(nextarg);
         config = global->last;
         if(result == PARAM_NEXT_OPERATION) {
           /* Reset result as PARAM_NEXT_OPERATION is only used here and not
@@ -2932,11 +3071,12 @@ ParameterError parse_args(struct GlobalConfig *global, int argc,
       bool used;
 
       /* Just add the URL please */
-      result = getparameter("--url", orig_opt, argv[i], &used, global, config);
+      result = getparameter("--url", orig_opt, NULL, NULL,
+                            &used, global, config);
     }
 
     if(!result)
-      curlx_unicodefree(orig_opt);
+      unicodefree(orig_opt);
   }
 
   if(!result && config->content_disposition) {
@@ -2957,6 +3097,6 @@ ParameterError parse_args(struct GlobalConfig *global, int argc,
       helpf(tool_stderr, "%s", reason);
   }
 
-  curlx_unicodefree(orig_opt);
+  unicodefree(orig_opt);
   return result;
 }
