@@ -158,7 +158,7 @@ size_t tool_header_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
           /*
            * Truncate the etag save stream, it can have an existing etag value.
            */
-#ifdef HAVE_FTRUNCATE
+#if defined(HAVE_FTRUNCATE) && !defined(__MINGW32CE__)
           if(ftruncate(fileno(etag_save->stream), 0)) {
             return CURL_WRITEFUNC_ERROR;
           }
@@ -250,7 +250,7 @@ size_t tool_header_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
          hdrcbdata->config->show_headers) {
         /* still awaiting the Content-Disposition header, store the header in
            memory. Since it is not zero terminated, we need an extra dance. */
-        char *clone = aprintf("%.*s", (int)cb, (char *)str);
+        char *clone = aprintf("%.*s", (int)cb, str);
         if(clone) {
           struct curl_slist *old = hdrcbdata->headlist;
           hdrcbdata->headlist = curl_slist_append(old, clone);
@@ -414,13 +414,14 @@ void write_linked_location(CURL *curl, const char *location, size_t loclen,
   const char *loc = location;
   size_t llen = loclen;
   int space_skipped = 0;
-  char *vver = getenv("VTE_VERSION");
+  const char *vver = getenv("VTE_VERSION");
 
   if(vver) {
-    long vvn = strtol(vver, NULL, 10);
-    /* Skip formatting for old versions of VTE <= 0.48.1 (Mar 2017) since some
-       of those versions have formatting bugs. (#10428) */
-    if(0 < vvn && vvn <= 4801)
+    curl_off_t num;
+    if(curlx_str_number(&vver, &num, CURL_OFF_T_MAX) ||
+       /* Skip formatting for old versions of VTE <= 0.48.1 (Mar 2017) since
+          some of those versions have formatting bugs. (#10428) */
+       (num <= 4801))
       goto locout;
   }
 

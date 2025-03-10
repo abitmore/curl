@@ -38,8 +38,8 @@ int Curl_inet_pton(int, const char *, void *);
 #ifdef HAVE_ARPA_INET_H
 #include <arpa/inet.h>
 #endif
-#if defined(__AMIGA__)
-#define Curl_inet_pton(x,y,z) inet_pton(x,(unsigned char *)y,z)
+#ifdef __AMIGA__
+#define Curl_inet_pton(x,y,z) inet_pton(x,(unsigned char *)CURL_UNCONST(y),z)
 #else
 #define Curl_inet_pton(x,y,z) inet_pton(x,y,z)
 #endif

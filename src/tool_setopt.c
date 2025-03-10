@@ -164,6 +164,7 @@ static const struct NameValue setopt_nv_CURLNONZERODEFAULTS[] = {
   NV1(CURLOPT_PROXY_SSL_VERIFYPEER, 1),
   NV1(CURLOPT_PROXY_SSL_VERIFYHOST, 1),
   NV1(CURLOPT_SOCKS5_AUTH, 1),
+  NV1(CURLOPT_UPLOAD_FLAGS, CURLULFLAG_SEEN),
   NVEND
 };
 
@@ -185,12 +186,12 @@ static const struct NameValue setopt_nv_CURLNONZERODEFAULTS[] = {
   } \
 } while(0)
 
-#define DECL0(s) ADD((&easysrc_decl, s))
+/* #define DECL0(s) ADD((&easysrc_decl, s)) */
 #define DECL1(f,a) ADDF((&easysrc_decl, f,a))
 
-#define DATA0(s) ADD((&easysrc_data, s))
+/* #define DATA0(s) ADD((&easysrc_data, s)) */
 #define DATA1(f,a) ADDF((&easysrc_data, f,a))
-#define DATA2(f,a,b) ADDF((&easysrc_data, f,a,b))
+/* #define DATA2(f,a,b) ADDF((&easysrc_data, f,a,b)) */
 #define DATA3(f,a,b,c) ADDF((&easysrc_data, f,a,b,c))
 
 #define CODE0(s) ADD((&easysrc_code, s))
@@ -198,11 +199,11 @@ static const struct NameValue setopt_nv_CURLNONZERODEFAULTS[] = {
 #define CODE2(f,a,b) ADDF((&easysrc_code, f,a,b))
 #define CODE3(f,a,b,c) ADDF((&easysrc_code, f,a,b,c))
 
-#define CLEAN0(s) ADD((&easysrc_clean, s))
+/* #define CLEAN0(s) ADD((&easysrc_clean, s)) */
 #define CLEAN1(f,a) ADDF((&easysrc_clean, f,a))
 
-#define REM0(s) ADD((&easysrc_toohard, s))
-#define REM1(f,a) ADDF((&easysrc_toohard, f,a))
+/* #define REM0(s) ADD((&easysrc_toohard, s)) */
+/* #define REM1(f,a) ADDF((&easysrc_toohard, f,a)) */
 #define REM3(f,a,b,c) ADDF((&easysrc_toohard, f,a,b,c))
 
 /* Escape string to C string syntax. Return NULL if out of memory.
@@ -251,7 +252,7 @@ static char *c_escape(const char *str, curl_off_t len)
                                 /* Octal escape to avoid >2 digit hex. */
                                 (len > 1 && ISXDIGIT(s[1])) ?
                                   "\\%03o" : "\\x%02x",
-                                (unsigned int) *(unsigned char *) s);
+                                (unsigned int) *(const unsigned char *) s);
       }
     }
   }
@@ -405,7 +406,7 @@ static CURLcode libcurl_generate_slist(struct curl_slist *slist, int *slistno)
   CLEAN1("curl_slist_free_all(slist%d);", *slistno);
   CLEAN1("slist%d = NULL;", *slistno);
   for(; slist; slist = slist->next) {
-    Curl_safefree(escaped);
+    free(escaped);
     escaped = c_escape(slist->data, ZERO_TERMINATED);
     if(!escaped)
       return CURLE_OUT_OF_MEMORY;
@@ -457,7 +458,7 @@ static CURLcode libcurl_generate_mime_part(CURL *curl,
   case TOOLMIME_DATA:
     data = part->data;
     if(!ret) {
-      Curl_safefree(escaped);
+      free(escaped);
       escaped = c_escape(data, ZERO_TERMINATED);
       NULL_CHECK(escaped);
       CODE2("curl_mime_data(part%d, \"%s\", CURL_ZERO_TERMINATED);",
@@ -491,28 +492,28 @@ static CURLcode libcurl_generate_mime_part(CURL *curl,
   }
 
   if(!ret && part->encoder) {
-    Curl_safefree(escaped);
+    free(escaped);
     escaped = c_escape(part->encoder, ZERO_TERMINATED);
     NULL_CHECK(escaped);
     CODE2("curl_mime_encoder(part%d, \"%s\");", mimeno, escaped);
   }
 
   if(!ret && filename) {
-    Curl_safefree(escaped);
+    free(escaped);
     escaped = c_escape(filename, ZERO_TERMINATED);
     NULL_CHECK(escaped);
     CODE2("curl_mime_filename(part%d, \"%s\");", mimeno, escaped);
   }
 
   if(!ret && part->name) {
-    Curl_safefree(escaped);
+    free(escaped);
     escaped = c_escape(part->name, ZERO_TERMINATED);
     NULL_CHECK(escaped);
     CODE2("curl_mime_name(part%d, \"%s\");", mimeno, escaped);
   }
 
   if(!ret && part->type) {
-    Curl_safefree(escaped);
+    free(escaped);
     escaped = c_escape(part->type, ZERO_TERMINATED);
     NULL_CHECK(escaped);
     CODE2("curl_mime_type(part%d, \"%s\");", mimeno, escaped);
@@ -714,7 +715,5 @@ nomem:
   Curl_safefree(escaped);
   return ret;
 }
-
-#else /* CURL_DISABLE_LIBCURL_OPTION */
 
 #endif /* CURL_DISABLE_LIBCURL_OPTION */

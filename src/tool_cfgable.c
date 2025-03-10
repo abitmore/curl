@@ -45,6 +45,7 @@ void config_init(struct OperationConfig *config)
   config->http09_allowed = FALSE;
   config->ftp_skip_ip = TRUE;
   config->file_clobber_mode = CLOBBER_DEFAULT;
+  config->upload_flags = CURLULFLAG_SEEN;
   curlx_dyn_init(&config->postdata, MAX_FILE2MEMORY);
 }
 
@@ -60,7 +61,7 @@ static void free_config_fields(struct OperationConfig *config)
   Curl_safefree(config->cookiejar);
   curl_slist_free_all(config->cookiefiles);
 
-  Curl_dyn_free(&config->postdata);
+  curlx_dyn_free(&config->postdata);
   Curl_safefree(config->query);
   Curl_safefree(config->referer);
 
