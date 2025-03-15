@@ -74,7 +74,7 @@ static size_t write_memory_callback(char *contents, size_t size,
 
 static
 #if defined(USE_THREADS_POSIX) || defined(USE_THREADS_WIN32)
-#if defined(_WIN32_WCE) || defined(CURL_WINDOWS_UWP)
+#if defined(CURL_WINDOWS_UWP) || defined(UNDER_CE)
 DWORD
 #else
 unsigned int
@@ -95,7 +95,7 @@ test_thread(void *ptr)
   for(i = 0; i < PER_THREAD_SIZE; i++) {
     CURL *curl = curl_easy_init();
     if(curl) {
-      curl_easy_setopt(curl, CURLOPT_URL, (char *)ctx->URL);
+      curl_easy_setopt(curl, CURLOPT_URL, (char *)CURL_UNCONST(ctx->URL));
 
       /* use the share object */
       curl_easy_setopt(curl, CURLOPT_SHARE, ctx->share);

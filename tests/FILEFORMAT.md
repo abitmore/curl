@@ -163,6 +163,7 @@ Available substitute variables include:
 - `%POSIX_PWD` - Current directory somewhat MinGW friendly
 - `%PROXYPORT` - Port number of the HTTP proxy
 - `%PWD` - Current directory
+- `%RESOLVE` - server/resolve command
 - `%RTSP6PORT` - IPv6 port number of the RTSP server
 - `%RTSPPORT` - Port number of the RTSP server
 - `%SMBPORT` - Port number of the SMB server
@@ -434,6 +435,7 @@ feature is NOT required. If the feature is present then the test is SKIPPED.
 
 Features testable here are:
 
+- `--libcurl`
 - `alt-svc`
 - `AppleIDN`
 - `asyn-rr` - c-ares is used for additional records only
